@@ -389,8 +389,8 @@ def main(specfile, spec, bound, redshift, linename, linewav, pdf_pages,
 
 #---------------------------------------------------------------
 
-root = 'a1795'
-specfile = root + '/image_nh0p041_v100_exp1000_Z0p5.csv'
+# root = 'a1795'
+specfile = '/image_nh0p041_v100_exp1000_Z0p5.csv'
 
 # Create the spec object
 spec = Spectrum(specfile)
