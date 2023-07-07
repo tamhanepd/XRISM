@@ -127,21 +127,23 @@ class fit_line():
 
 
 
-    def get_fit_info(self, pout=False, ncomp=1, linename=''):
+    def get_fit_info(self, pout=False, ncomp=1, linename='', linefree=None):
         """
         Generates a dictionary of best fit parameter values and their 1-sigma uncertainties.
 
         Parameters:
             pout (bool): Whether to print out the results in the terminal. Default: False
             ncomp (int): Number of Gaussian components used in the fit. Default: 6
+            linename (str): The name of the emission line
+            linefree (list or array-like): The starting and end wavelengths of linefree regions. Default: None
 
         Returns:
             output (list): List of lists containing the fit parameter values and their 1-sigma errors for each component.
                 Each inner list contains the following information:
                 - Component number
-                - Amplitude value
-                - Positive error for amplitude
-                - Negative error for amplitude
+                - Area of the line value
+                - Positive error for area
+                - Negative error for area
                 - Center value
                 - Positive error for center
                 - Negative error for center
@@ -151,20 +153,24 @@ class fit_line():
                 - Velocity dispersion value (calculated as sigma / center * speed of light)
                 - Positive error for velocity dispersion
                 - Negative error for velocity dispersion
+                - significance of detection
         """
 
         c = 299792.458 # km/s, speed of light
         table = []
-
+        
         try:
             # Compute confidence intervals for the fit parameters
             ci = lmfit.conf_interval(self.result, self.result)
+            # print(ci)
             
             for i in range(ncomp):
                 # Extract the confidence intervals for amplitude, center, and sigma
-                amp_conf_int = ci['g{}_amplitude'.format(i+1)]
+                amp_conf_int = ci['g{}_amplitude'.format(i+1)]  # This is actually the area/flux of the line
                 cen_conf_int = ci['g{}_center'.format(i+1)]
                 sigma_conf_int = ci['g{}_sigma'.format(i+1)]
+                intercept_conf_int = ci['intercept']
+                slope_conf_int = ci['slope']
                 
                 # Extract the best-fit values and calculate the positive and negative errors
                 amp_val = amp_conf_int[3][1]
@@ -183,12 +189,25 @@ class fit_line():
                 sigma_vel_val = sigma_val / cen_val * c
                 sigma_vel_err_pos = sigma_err_pos / cen_val * c
                 sigma_vel_err_neg = sigma_err_neg / cen_val * c
+
+                # Calculate detection significance
+                peak_val = amp_val/(sigma_val*(2*np.pi)**0.5)  # Converting area of the line to its peak value
+
+                if linefree is not None:
+                    idx = np.where(np.logical_and(self.spec.x >= linefree[0], 
+                                          self.spec.x <= linefree[1]))
+                    noise = np.std(self.result.residual[idx])
+                else:
+                    noise = np.std(self.result.residual)
+
+                significance = peak_val / noise
                 
                 # Append the fit information for this component to the table
                 table.append([linename+'_'+str(i+1), amp_val, amp_err_pos, amp_err_neg,
                               cen_val, cen_err_pos, cen_err_neg,
                               sigma_val, sigma_err_pos, sigma_err_neg,
-                              sigma_vel_val, sigma_vel_err_pos, sigma_vel_err_neg])
+                              sigma_vel_val, sigma_vel_err_pos, sigma_vel_err_neg,
+                              significance])
         
         except lmfit.minimizer.MinimizerException:
             # If an exception occurs during the computation of confidence intervals,
@@ -203,7 +222,8 @@ class fit_line():
                 table.append([linename+'_'+str(i+1), amp_val, 0, 0,
                               cen_val, 0, 0,
                               sigma_val, 0, 0,
-                              sigma_vel_val, 0, 0])
+                              sigma_vel_val, 0, 0,
+                              0])
 
         if pout:
             # Print the table if pout is True
@@ -297,7 +317,7 @@ def write_outputs_to_csv(line, result, filename):
     # Write the output values to a CSV file
     fieldnames = ['line', 'amp', 'amp_p', 'amp_n', 'center', 'center_p', 'center_n',
                   'sigma', 'sigma_p', 'sigma_n',
-                  'sigma_vel', 'sigma_vel_p', 'sigma_vel_n', 'v_th', 'v_th_err',
+                  'sigma_vel', 'sigma_vel_p', 'sigma_vel_n', 'significance', 'v_th', 'v_th_err',
                   'v_instr', 'v_turb', 'v_turb_err']
     
     # check if the file already exists
@@ -389,8 +409,8 @@ def main(specfile, spec, bound, redshift, linename, linewav, pdf_pages,
 
 #---------------------------------------------------------------
 
-# root = 'a1795'
-specfile = '/image_nh0p041_v100_exp1000_Z0p5.csv'
+root = 'a1795'
+specfile = root + '/image_nh0p041_v100_exp1000_Z0p5.csv'
 
 # Create the spec object
 spec = Spectrum(specfile)
@@ -432,6 +452,7 @@ main(specfile, spec, 0.02, 0.063001, 'Si XIV', lines.Si_XIV, pdf_pages, mass=28.
 #---------------------------------------------------------------
 
 # Fe lines around 1 keV:
+# The biggest line at rest frame ~1.168 keV is a resonant scattering line
 
 amplitudes=[3, 6, 3, 13, 8, 13]
 centers = [0.992, 1.02, 1.035, 1.038, 1.058, 1.097]
@@ -444,6 +465,7 @@ main(specfile, spec, 0.08, 0.063001, 'Fe_XXIV', lines.Fe_XXIV_b, pdf_pages,
 #---------------------------------------------------------------
 
 # Fe K line and other lines around it:
+# The biggest line at rest frame ~6.7 keV is a resonant scattering line
 
 amplitudes=[0.5,3.5,1.5,2.5,2,10]
 centers = [6.227, 6.247, 6.265, 6.275, 6.289, 6.307]
