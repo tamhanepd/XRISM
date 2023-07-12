@@ -98,21 +98,30 @@ class fit_line():
         # Perform the fitting operation using lmfit
         result = model.fit(y, params, x=x, weights=1/yerr)
 
-        # Plot the data and the fitted model
-        plt.errorbar(self.spec.x[idx], self.spec.y[idx], xerr=self.spec.xerr[idx], yerr=self.spec.yerr[idx], fmt='.', color='k', alpha=0.5)
-        plt.plot(self.spec.x[idx], result.best_fit, 'r-', label='fit')
+        # Plot the data, the fitted model and the residual
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(8, 6),
+                                       gridspec_kw={'hspace': 0, 'wspace': 0,
+                                                    'height_ratios': [2, 1]})
+
+        ax1.errorbar(x, y, xerr=xerr, yerr=yerr, fmt='.', color='k', alpha=0.5)
+        ax1.plot(x, result.best_fit, 'r-', label='fit')
         
         if ncomp > 1:
             # Plot individual components with the best-fit model
             comps = result.eval_components(x=x)
             for i in range(ncomp):
                 prefix = 'g{}_'.format(i + 1)
-                plt.plot(x, comps[prefix], ls='--', label='Comp {}'.format(i + 1))
+                ax1.plot(x, comps[prefix], ls='--', label='Comp {}'.format(i + 1))
 
-        plt.xlabel('Energy (keV)')
-        plt.ylabel(r'counts s$^{-1}$ keV$^{-1}$')
-        plt.title(title)
-        plt.legend(fontsize=12)
+        residuals = y - result.best_fit
+        ax2.axhline(y=0, ls='--', c='grey')
+        ax2.plot(x, residuals, 'k')
+        ax1.set_ylabel(r'counts s$^{-1}$ keV$^{-1}$')
+        ax1.set_title(title)
+        ax1.legend(fontsize=12)
+        ax2.set_xlabel('Energy (keV)')
+        ax2.set_ylabel('Residuals')
+        plt.tight_layout()
         
         # Save the plot to a file if specified
         if figname != None:
@@ -124,6 +133,7 @@ class fit_line():
 
         # Store the fitting result in the object's attribute
         self.result = result
+        self.residual = residuals
 
 
 
@@ -193,14 +203,16 @@ class fit_line():
                 # Calculate detection significance
                 peak_val = amp_val/(sigma_val*(2*np.pi)**0.5)  # Converting area of the line to its peak value
 
+                x = self.result.userkws['x']
                 if linefree is not None:
-                    idx = np.where(np.logical_and(self.spec.x >= linefree[0], 
-                                          self.spec.x <= linefree[1]))
-                    noise = np.std(self.result.residual[idx])
+                    idx = np.where(np.logical_and(x >= linefree[0], 
+                                          x <= linefree[1]))
+                    noise = np.std(self.residual[idx])
                 else:
-                    noise = np.std(self.result.residual)
+                    noise = np.std(self.residual)
 
                 significance = peak_val / noise
+                print("Peak:", peak_val, "Noise:", noise)
                 
                 # Append the fit information for this component to the table
                 table.append([linename+'_'+str(i+1), amp_val, amp_err_pos, amp_err_neg,
@@ -218,12 +230,25 @@ class fit_line():
                 sigma_val = self.result.params['g{}_sigma'.format(i+1)].value
                 sigma_vel_val = sigma_val / cen_val * c
 
+                # Calculate detection significance
+                peak_val = amp_val/(sigma_val*(2*np.pi)**0.5)  # Converting area of the line to its peak value
+                x = self.result.userkws['x']
+                if linefree is not None:
+                    idx = np.where(np.logical_and(x >= linefree[0], 
+                                          x <= linefree[1]))
+                    noise = np.std(self.residual[idx])
+                else:
+                    noise = np.std(self.residual)
+
+                significance = peak_val / noise
+                print("Peak:", peak_val, "Noise:", noise)
+
                 # Set errors to 0 as confidence intervals could not be computed
                 table.append([linename+'_'+str(i+1), amp_val, 0, 0,
                               cen_val, 0, 0,
                               sigma_val, 0, 0,
                               sigma_vel_val, 0, 0,
-                              0])
+                              significance])
 
         if pout:
             # Print the table if pout is True
@@ -334,7 +359,7 @@ def write_outputs_to_csv(line, result, filename):
 
 def main(specfile, spec, bound, redshift, linename, linewav, pdf_pages,
          amplitudes=None, sigmas=None, centers=None, ncomp=1, figname=None,
-         T=4, T_err=0.2, mass=1.2):
+         T=4, T_err=0.2, mass=1.2, linefree=None):
     """
     Fit a single Gaussian + linear component model to a given spectrum and
     plot the input spectrum and best-fit model.
@@ -393,7 +418,8 @@ def main(specfile, spec, bound, redshift, linename, linewav, pdf_pages,
     plt.clf()
 
     # Retrieve the fit information
-    result = fitter.get_fit_info(pout=False, ncomp=ncomp, linename=linename)
+    result = fitter.get_fit_info(pout=False, ncomp=ncomp, linename=linename,
+        linefree=linefree)
     print(linename)
     print("\n")
 
@@ -429,25 +455,29 @@ pdf_pages = PdfPages(output_pdf)
 #---------------------------------------------------------------
 
 # Fit OVIII line
-main(specfile, spec, 0.07, 0.063001, 'OVIII', lines.O_VIII, pdf_pages, mass=15.999)
+main(specfile, spec, 0.07, 0.063001, 'OVIII', lines.O_VIII, pdf_pages, mass=15.999,
+    linefree=[0.56, 0.60])
 
 #---------------------------------------------------------------
 
 # Ne X line:
 
-main(specfile, spec, 0.02, 0.063001, 'Ne X', lines.Ne_X, pdf_pages, mass=20.1797)
+main(specfile, spec, 0.02, 0.063001, 'Ne X', lines.Ne_X, pdf_pages, mass=20.1797,
+    linefree=[0.94, 0.95])
 
 #---------------------------------------------------------------
 
 # Mg XII line:
 
-main(specfile, spec, 0.02, 0.063001, 'Mg XII', lines.Mg_XII, pdf_pages, mass=24.305)
+main(specfile, spec, 0.02, 0.063001, 'Mg XII', lines.Mg_XII, pdf_pages, mass=24.305,
+    linefree=[1.366, 1.376])
 
 #---------------------------------------------------------------
 
 # Si XIV line:
 
-main(specfile, spec, 0.02, 0.063001, 'Si XIV', lines.Si_XIV, pdf_pages, mass=28.0855)
+main(specfile, spec, 0.02, 0.063001, 'Si XIV', lines.Si_XIV, pdf_pages, mass=28.0855,
+    linefree=[1.866, 1.878])
 
 #---------------------------------------------------------------
 
@@ -460,7 +490,7 @@ sigmas = [0.005, 0.005, 0.005, 0.005, 0.005, 0.005]
 
 main(specfile, spec, 0.08, 0.063001, 'Fe_XXIV', lines.Fe_XXIV_b, pdf_pages,
     amplitudes=amplitudes, centers=centers, sigmas=sigmas, ncomp=6,
-    mass=55.847)
+    mass=55.847, linefree=[1.115, 1.135])
 
 #---------------------------------------------------------------
 
@@ -473,7 +503,7 @@ sigmas = [0.005, 0.01, 0.005, 0.005, 0.005, 0.008]
 
 main(specfile, spec, 0.08, 0.063001, 'Fe_K', lines.Fe_K, pdf_pages,
     amplitudes=amplitudes, centers=centers, sigmas=sigmas, ncomp=6,
-    mass=55.847)
+    mass=55.847, linefree=[6.330, 6.360])
 
 
 # Close the PDF file
